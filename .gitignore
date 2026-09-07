@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+
+# Self-check scripts, kept out of version control by request.
+# Delete this line to start tracking them.
+scripts/

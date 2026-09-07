@@ -1,0 +1,111 @@
+# What the dealer says, grouped by the moment that triggers it.
+#
+# Nothing here touches the rules -- it is pure flavour. One line is picked at
+# random per event so a long session does not sound like a recording.
+#
+# Write whatever you like. {name} is filled in with the dealer's name; anything
+# else in braces is printed as written, and even an unbalanced brace just shows
+# up as text. Nothing here can break a hand, and nothing checks your prose.
+#
+# Adding a line is just adding a string. Adding a *group* means teaching the code
+# when to fire it, so the group names below are the ones the code knows about;
+# scripts/check_content.py will say so if one goes missing.
+
+# --- Coming and going (R2.14) ---------------------------------------------
+arrive = [
+  "Evening, folks. {name} taking over. Let's find you some cards.",
+  "Hi, I'm {name}. Fresh hands, fresh luck -- that's the theory anyway.",
+  "{name} on the box. Good luck, and take it easy on me.",
+  "New dealer, same deck. I'm {name}. Let's play.",
+  "{name} here. I'll try not to make a habit of twenty-ones.",
+]
+
+leave = [
+  "That's my push. {name} out -- thanks for the action.",
+  "I'm off. Been a pleasure, good luck with the next one.",
+  "Break time. Don't win it all while I'm gone.",
+  "Colouring up and stepping away. Thanks, folks.",
+]
+
+# --- Tips (R2.10) ----------------------------------------------------------
+tip = [
+  "Hey, thank you kindly.",
+  "Much appreciated. That one's going in my shoe.",
+  "Thanks! Now I have to root for you.",
+  "Very generous. I'll pretend that doesn't affect my shuffling.",
+]
+
+# --- A bet placed on the dealer's behalf (R2.11) ---------------------------
+# The moment the chip goes out.
+toke_placed = [
+  "For me? Thank you -- let's get there together.",
+  "Appreciate it. I'm on your side now, officially.",
+  "A bet for the dealer! Nobody tell my boss I'm rooting against him.",
+  "Thanks. That's the good kind of pressure.",
+]
+
+toke_win = [
+  "Would you look at that -- we both got paid.",
+  "That's my bet too! Best hand of my shift.",
+  "Riding with you paid off. Thank you.",
+  "See, this is why I like you.",
+]
+
+toke_lose = [
+  "Ah well, mine went down with yours. Next one.",
+  "We lost that together. I'll take the company.",
+  "There goes my bet too. Story of my night.",
+  "Both of us on that one. Ouch.",
+]
+
+# --- The player collects something unusual ---------------------------------
+# Four tiers, by how long the odds were on the side bet that came in.
+win_nice = [
+  "Hey, that one paid. Nicely done.",
+  "There we go -- that's a real ticket.",
+  "Good call on the side bet. Enjoy that.",
+]
+
+win_big = [
+  "Whoa, fifteen to one! That doesn't come around often.",
+  "Now that's a hand. Let me count that out properly.",
+  "Big one. I'm going to remember that for a while.",
+]
+
+win_huge = [
+  "Fifty to one! Folks, look at this.",
+  "Are you serious? That's the best thing I've seen all shift.",
+  "Unbelievable. Congratulations, seriously.",
+]
+
+win_jackpot = [
+  "JACKPOT! Everybody, we have a winner here!",
+  "That's the big one. I need a supervisor and probably a minute.",
+  "In eleven years I have seen that twice. Congratulations!",
+  "Two hundred and fifty to one. I'm shaking and it isn't even my money.",
+]
+
+# Won a pile across the hands themselves rather than on a side bet -- usually a
+# split that kept splitting, with free doubles on top. Triggered by how many
+# times the base bet came back rather than by any odds.
+win_hands = [
+  "Look at all that. Every one of them good.",
+  "That's a lot of hands and a lot of chips. Well played.",
+  "The free bets did some work there. Nice one.",
+  "Now that is what splitting is for. Congratulations.",
+  "I'm paying that one out in stages. Great hand.",
+]
+
+# --- The dealer beats the table --------------------------------------------
+dealer_21 = [
+  "Twenty-one. Sorry, folks -- I didn't want that either.",
+  "Ugh, twenty-one. That's not on me, I just turn them over.",
+  "Twenty-one again. I'd apologise, but you'd think I meant it.",
+  "Sorry about that one. The deck's being unkind tonight.",
+]
+
+dealer_blackjack = [
+  "Blackjack. I hate showing you that one.",
+  "Ace up, ten down. Sorry -- nothing I could do.",
+  "Dealer blackjack. Truly, my apologies.",
+]

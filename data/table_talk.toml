@@ -1,0 +1,53 @@
+# What the seated characters say to each other (RULES.md R2.19).
+#
+# Write freely -- {name} is the character being spoken to or speaking, and
+# anything else in braces is printed as written. Nothing here can break a hand.
+
+# --- Asking someone to give up their seat ---------------------------------
+ask_move = [
+  "{name}, would you mind sliding over a seat? I'd like to play two hands.",
+  "Hey {name} -- any chance you'd take another spot? I want the seat next to mine.",
+  "{name}, could I trouble you to move down one?",
+]
+
+agree_move = [
+  "Sure, no problem. This seat's been cold anyway.",
+  "Ha! Fine, I was going to move regardless.",
+  "For you? Of course. Don't make me regret it.",
+  "Take it. Let's see if it treats you better.",
+]
+
+refuse_move = [
+  "Not a chance. I've been building this spot all night.",
+  "Sorry, I'm settled. Try someone else.",
+  "This is my seat. You'll have to wait for the shoe.",
+  "Nope. Superstition beats politeness, I'm afraid.",
+]
+
+# --- Being nice ------------------------------------------------------------
+compliment = [
+  "{name}, that was a beautiful play.",
+  "Nice hand, {name}.",
+  "{name}, you're the only one at this table who knows what they're doing.",
+]
+
+compliment_reply = [
+  "Well, thank you. Don't jinx me.",
+  "Appreciate that. Took me thirty years to learn it.",
+  "You're all right, you know that?",
+  "Flattery works on me. Ask me for anything.",
+]
+
+# --- Being rude ------------------------------------------------------------
+insult = [
+  "{name}, that was the worst play I've seen all night.",
+  "Do you even know the rules, {name}?",
+  "{name}, you're costing everyone at this table.",
+]
+
+insult_reply = [
+  "Charming. Play your own cards.",
+  "Say that again and see what the seat next to you costs.",
+  "Wow. All right then.",
+  "I've been dealt worse than you, friend.",
+]

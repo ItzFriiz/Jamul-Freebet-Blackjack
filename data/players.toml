@@ -1,0 +1,112 @@
+# The computer players who can occupy the other seats (RULES.md R2.16).
+#
+# Nothing here is hard-coded anywhere; add, remove or rewrite a character by
+# editing this file. Each one needs every field below --
+# scripts/check_content.py checks that.
+#
+# Fields
+#   bio          one or two sentences, shown when they sit down
+#   bet_units    base bet as a multiple of the table minimum
+#   spread       how much they vary that bet, 0 = always the same
+#   side_bets    "none" | "rare" | "sometimes" | "always"
+#   tips         "never" | "rare" | "sometimes" | "often"
+#   toke_bets    whether they ever bet on the dealer's behalf
+#   play         "basic" | "cautious" | "aggressive" | "superstitious" | "mimic"
+#   agreeable    0.0 - 1.0, how likely they are to give up a seat when asked (R2.19)
+#   buy_in       what they sit down with, in dollars
+
+[[player]]
+name = "Ernie"
+bio = "Retired postal inspector. Plays the same twenty-five dollars every hand and has opinions about people who don't."
+bet_units = 1
+spread = 0
+side_bets = "none"
+tips = "rare"
+toke_bets = false
+play = "basic"
+agreeable = 0.3
+buy_in = 400
+
+[[player]]
+name = "Delphine"
+bio = "Here for the side bets. Says the main game is just the price of admission for a shot at the Buster."
+bet_units = 1
+spread = 0
+side_bets = "always"
+tips = "often"
+toke_bets = true
+play = "cautious"
+agreeable = 0.8
+buy_in = 600
+
+[[player]]
+name = "Big Ray"
+bio = "Loud, generous, and allergic to standing on anything under seventeen. Buys in for more than he should."
+bet_units = 4
+spread = 2
+side_bets = "sometimes"
+tips = "often"
+toke_bets = true
+play = "aggressive"
+agreeable = 0.6
+buy_in = 2000
+
+[[player]]
+name = "Junie"
+bio = "Counts something, though it may not be the cards. Moves seats when the shoe feels wrong to her."
+bet_units = 2
+spread = 3
+side_bets = "rare"
+tips = "sometimes"
+toke_bets = false
+play = "superstitious"
+agreeable = 0.2
+buy_in = 800
+
+[[player]]
+name = "Oscar"
+bio = "Watches the player to his right and copies whatever they did. Insists this is a system."
+bet_units = 1
+spread = 1
+side_bets = "sometimes"
+tips = "rare"
+toke_bets = false
+play = "mimic"
+agreeable = 0.9
+buy_in = 500
+
+[[player]]
+name = "Mrs. Pham"
+bio = "Plays two hands when she can get the seats, and will ask you politely but firmly to slide over."
+bet_units = 2
+spread = 0
+side_bets = "none"
+tips = "sometimes"
+toke_bets = true
+play = "basic"
+agreeable = 0.1
+buy_in = 1200
+
+[[player]]
+name = "Tyler"
+bio = "Read one article about free bet blackjack on the flight in. Doubles everything the casino will let him double."
+bet_units = 1
+spread = 1
+side_bets = "sometimes"
+tips = "never"
+toke_bets = false
+play = "aggressive"
+agreeable = 0.7
+buy_in = 300
+
+[[player]]
+name = "Constance"
+bio = "Quiet, precise, never says a word about her cards. Leaves the moment she is up two hundred."
+bet_units = 2
+spread = 0
+side_bets = "none"
+tips = "rare"
+toke_bets = false
+play = "basic"
+agreeable = 0.5
+buy_in = 1000

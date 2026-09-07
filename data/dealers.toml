@@ -1,0 +1,9 @@
+# Dealers who work this table.
+#
+# Editing this file is enough to change the roster -- nothing in the code knows
+# any of these names. See RULES.md R2.14 for how shifts work.
+
+names = [
+  "Rosa", "Marcus", "Ivy", "Deshawn", "Priya", "Tomás",
+  "Nadia", "Wes", "Lian", "Gabriel", "Simone", "Hideo",
+]
