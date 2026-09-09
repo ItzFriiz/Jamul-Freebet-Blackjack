@@ -23,7 +23,15 @@ from .state import Action, Phase, RoundState, SeatBets
 
 
 class BetError(ValueError):
-    """A bet the table will not accept, or one the player's chips cannot make."""
+    """A bet the table will not accept."""
+
+
+class ChipsError(BetError):
+    """The bet is legal, but this rack cannot put it out (R2.8).
+
+    Told apart from a rule refusal so the interface can say something more
+    useful than the change-making failure it grew out of.
+    """
 
 
 @dataclass
@@ -177,6 +185,15 @@ class Table:
             raise BetError("a seat cannot be given up partway through a hand")
         seat = self.seats[index]
         who, seat.occupant = seat.occupant, None
+        # R2.11 a toke that pushed is the player's to take back right up to the
+        # next deal, so giving the box up takes it back. Left on an empty spot it
+        # would be handed to whoever sits down there next.
+        if seat.toke_on_table and who is not None:
+            who.chips.receive(seat.toke_on_table)
+        seat.toke_on_table = 0
+        seat.resting_before = 0
+        seat.bet_chips = {}
+        seat.committed = 0
         seat.sitting_out = False
         seat.waiting_for_shoe = False
         seat.pending = None
@@ -234,8 +251,14 @@ class Table:
         taken = self.bot_names()
         return [c for c in roster() if c.name not in taken]
 
-    def move_seat(self, frm: int, to: int) -> None:
-        """R2.13 an occupant moving to an empty seat, chips and all."""
+    def move_seat(self, frm: int, to: int) -> list[int]:
+        """R2.13 an occupant moving to an empty seat, chips and all.
+
+        Returns the extra boxes that had to be given up to do it. R2.15 says a
+        player's boxes are next to each other; moving one of two would leave them
+        scattered down the table, which is not a shape a real player can have
+        (Junze, 2026-09-08). So every other box goes first and its bet comes back.
+        """
         if self.state is not None:
             raise BetError("seats cannot change partway through a hand")
         src, dst = self.seats[frm], self.seats[to]
@@ -243,6 +266,13 @@ class Table:
             raise BetError(f"seat {frm + 1} is empty")
         if dst.occupied:
             raise BetError(f"seat {to + 1} is taken by {dst.label}")
+        # Identity, not name: a person is allowed to share a character's name,
+        # and only the boxes held by this same occupant are theirs to give up.
+        released = [i for i, s in enumerate(self.seats)
+                    if i != frm and s.occupied and s.occupant is src.occupant]
+        for i in released:
+            self.cancel_bets(i)         # R2.15 the wager comes back, not the felt
+            self.vacate(i)
         # The chips belong to the occupant, so they travel without being moved.
         # Everything else about the box has to go too: a bet already on the
         # layout belongs to the player, not to the spot they were sitting in.
@@ -256,6 +286,7 @@ class Table:
         dst.bet_chips, src.bet_chips = src.bet_chips, {}
         dst.committed, src.committed = src.committed, 0
         dst.toke_on_table, src.toke_on_table = src.toke_on_table, 0
+        return released
 
     def take_extra_seat(self, frm: int, to: int) -> None:
         """R2.15 open a second box next door.
@@ -523,7 +554,7 @@ class Table:
         except ValueError as exc:
             s.chips = snapshot
             s.bet_chips = {}
-            raise BetError(str(exc)) from exc
+            raise ChipsError(str(exc)) from exc
 
         if top_up < 0:
             s.chips.receive(-top_up)     # the player pulled some of it back
@@ -670,6 +701,10 @@ class Table:
         if self.state is None or not self.state.is_over:
             raise RuntimeError("the round is not finished")
 
+        # R3.7 nothing is paid before it is seen: any hand still face down goes
+        # over now. The interface turns them one seat at a time first, so this
+        # is usually a no-op by the time it runs.
+        self.state.reveal_all()
         results = settle_round(self.state)
         for round_index, res in enumerate(results):
             s = self.seats[self.table_seat_of(round_index)]

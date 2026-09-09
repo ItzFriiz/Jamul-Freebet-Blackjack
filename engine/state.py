@@ -23,6 +23,7 @@ a solver both see exactly what a real player at the table would see.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import Enum, auto
 
@@ -117,6 +118,36 @@ class RoundState:
     def upcard(self) -> Card | None:
         return self.dealer.cards[0] if self.dealer.cards else None
 
+    # --- What each viewer has seen (R3.7) ----------------------------------
+    def dealer_public(self) -> list[Card]:
+        """The dealer's cards the table has seen -- the hole card only once turned."""
+        if self.hole_revealed:
+            return list(self.dealer.cards)
+        return self.dealer.cards[:1]
+
+    def seen_by(self, seats: Iterable[int] = ()) -> list[Card]:
+        """Every card this viewer has watched come out this round (R3.7).
+
+        `seats` are the round positions the viewer is holding: a player picks
+        their own cards up and sees all of them, and sees only what is face up
+        in front of everybody else. Pass nothing for somebody at the rail.
+
+        This is the honest information set -- what a person sitting there could
+        actually count. Counting off the full deal would be counting cards
+        nobody has been shown.
+        """
+        own = set(seats)
+        cards = self.dealer_public()
+        for i, seat in enumerate(self.seats):
+            for hand in seat.hands:
+                cards.extend(hand.cards if i in own else hand.public_cards())
+        return cards
+
+    @property
+    def face_down_on_felt(self) -> int:
+        """Cards lying face down in front of the players -- unseen, not dealt away."""
+        return sum(h.face_down for s in self.seats for h in s.hands)
+
     @property
     def cards_in_play(self) -> int:
         return len(self.dealer.cards) + sum(
@@ -189,7 +220,9 @@ class RoundState:
             self._after_peek()
 
         elif self.phase is Phase.PLAYER:
-            self.current().cards.append(card)
+            hand = self.current()
+            hand.cards.append(card)
+            self._expose_if_shown(hand)       # R3.7 busting throws the cards in
             self._pending_card = False
             self._settle_position()
 
@@ -271,8 +304,40 @@ class RoundState:
         if self.insurance_seat >= len(self.seats):
             self.phase = Phase.PEEK
 
+    def _expose_if_shown(self, hand: Hand) -> None:
+        """R3.7 a hand goes face up as soon as the table has to see it.
+
+        Busting means throwing the cards in, and a blackjack is shown straight
+        away so it can be paid. Doubling and splitting turn the hand over too,
+        but those are done where the action is applied.
+        """
+        if hand.is_bust or hand.is_blackjack:
+            hand.exposed = True
+
+    def reveal_all(self) -> None:
+        """R3.7 settlement: every hand still face down is turned over."""
+        for seat in self.seats:
+            for hand in seat.hands:
+                hand.exposed = True
+
+    def reveal_seat(self, index: int) -> bool:
+        """Turn one seat's hands over, and say whether anything was face down.
+
+        R3.7 the dealer works down the table at settlement; the interface uses
+        the return value to know which seats are worth pausing on.
+        """
+        turned = False
+        for hand in self.seats[index].hands:
+            if not hand.exposed and hand.cards:
+                turned = True
+            hand.exposed = True
+        return turned
+
     def _apply_double(self, hand: Hand) -> None:
-        """R4.2 free on 9/10/11, otherwise the player pays (R4.3). One card only."""
+        """R4.2 free on 9/10/11, otherwise the player pays (R4.3). One card only.
+
+        R3.7 asking to double means putting the hand face up on the felt.
+        """
         if hand.double_is_free(self.rules):
             hand.house_stake += hand.base_unit
             hand.doubled_free = True
@@ -282,6 +347,7 @@ class RoundState:
             hand.player_stake += hand.base_unit
             self.player_owes += hand.base_unit
         hand.doubled = True
+        hand.exposed = True
         self._pending_card = True
 
     def _apply_split(self, hand: Hand) -> None:
@@ -296,6 +362,8 @@ class RoundState:
         aces = is_ace(first)
         free = hand.split_is_free(self.rules)
 
+        # R3.7 a split is shown to the table -- both halves stay face up
+        hand.exposed = True
         hand.cards = [first]
         hand.from_split = True
         hand.from_split_aces = aces
@@ -312,6 +380,7 @@ class RoundState:
                 toke_house_stake=hand.toke_unit if free else 0,
                 from_split=True,
                 from_split_aces=aces,
+                exposed=True,
             ),
         )
         if not free:
@@ -321,6 +390,10 @@ class RoundState:
     # --- Phase transitions -------------------------------------------------
     def _after_deal(self) -> None:
         """R3.3 / R3.4 / R3.5 decide what happens once the opening cards are out."""
+        # R3.7 a blackjack is turned over at once, whoever is due to act next
+        for seat in self.seats:
+            for hand in seat.hands:
+                self._expose_if_shown(hand)
         up = self.upcard
         if is_ace(up):
             self.phase = Phase.INSURANCE      # insurance first, then peek (R3.3)

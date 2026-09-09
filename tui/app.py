@@ -18,7 +18,7 @@ from engine import scripted
 from engine.payout import Outcome
 from engine.players import Bot, by_name, roster, search
 from engine.state import Action, Phase
-from engine.table import BetError, Occupant, Table
+from engine.table import BetError, ChipsError, Occupant, Table
 from .chatter import big_hand, say, talk, will_move, win_tier
 from .format import parse_money
 from .render import (render_character_list, render_dealer_says,
@@ -31,6 +31,7 @@ DEALER_PACE = 1.0
 
 # R9.6 how long a computer player's decision sits on screen before it is applied.
 # Without this the other seats resolve faster than anyone can read them.
+REVEAL_PACE = 0.8      # R3.7 turning one seat's hand over at settlement
 BOT_PACE = 1.2
 
 ACTION_KEYS = {
@@ -61,7 +62,11 @@ class App:
         # A panel that takes over the whole screen for one redraw, so a long
         # character list is not fighting the table for space.
         self._overlay = None
-        self.last_bets = {"base": 25 * DOLLAR, "push22": 0, "buster": 0,
+        # Every spot starts empty. The bet is the player's to make -- putting a
+        # base bet up for them means they can deal a round they never chose the
+        # size of (Junze, 2026-09-08). After a round, this holds what they last
+        # played, so a repeat is still just one keypress.
+        self.last_bets = {"base": 0, "push22": 0, "buster": 0,
                           "toke_base": 0, "toke_push22": 0, "toke_buster": 0}
 
     # --- Setup -------------------------------------------------------------
@@ -112,7 +117,6 @@ class App:
         if self.clock is not None:
             kwargs["clock"] = self.clock
         self.table = Table(self.rules, self.rng, **kwargs)
-        self.last_bets["base"] = minimum
         self._seat_everyone()
         if self.watcher_name:
             self.table.arrive_standing(self.watcher_name, 0)   # buys in with `i`
@@ -612,6 +616,10 @@ class App:
             target = self._seat_index           # where they actually ended up
             asked.add(target)
             if pending == "sit out":            # R2.17
+                # A bet typed here is already out on the layout, so sitting the
+                # round out has to take it back off.
+                self.table.cancel_bets(target)
+                self.seat_bets.pop(target, None)
                 self.table.seats[target].sitting_out = True
                 continue
             self.table.seats[target].sitting_out = False
@@ -724,6 +732,15 @@ class App:
         pending["toke_base"] = max(pending["toke_base"],
                                    self.table.seats[seat_index].toke_on_table)
         note = None
+        # Carrying last round's bet over only helps while it is still payable.
+        # After a bad round it would sit there looking placed and then be refused
+        # at the deal, which is the thing that is confusing to begin with.
+        if self._bet_rejection(pending) is not None:
+            resting = self.table.seats[seat_index].toke_on_table
+            pending = {k: 0 for k in pending}
+            pending["toke_base"] = resting
+            note = Text("Your last bet is more than you have left, so the spots "
+                        "are clear. Put up a new one.", style="yellow")
         while True:
             # A `move` or a `join` can put this player in a different seat part
             # way through their own betting screen, so re-read it every redraw
@@ -764,9 +781,9 @@ class App:
                     note = Text("Nothing on the base spot. Put a bet up first, "
                                 "or sit this one out with o.", style="yellow")
                     continue
-                total = self._chips_out(pending)
-                if total > self.table.seats[seat_index].bankroll:
-                    note = Text("Not enough chips for those bets.", style="red")
+                refused = self._bet_rejection(pending)
+                if refused is not None:
+                    note = Text(refused, style="red")
                     continue
                 self.seat_bets[seat_index] = dict(pending)
                 self.last_bets = dict(pending)
@@ -830,7 +847,26 @@ class App:
                                 f"(`{'p' if own == 'push22' else 'u'} 5`), then you can "
                                 f"back the dealer on it.", style="yellow")
             was = pending[spot]
+            if spot == "base" and not amount:
+                # R2.4 taking the base bet down takes the whole layout with it:
+                # the side bets and the dealer's ride have nothing to stand on.
+                resting = self.table.seats[self._seat_index].toke_on_table
+                had = any(v for k, v in pending.items() if k != "base")
+                for key in pending:
+                    pending[key] = 0
+                self._place(pending)
+                pending["toke_base"] = self.table.seats[self._seat_index].toke_on_table
+                if had:
+                    return Text("Your base bet is down, so everything else on "
+                                "the spot came off with it.", style="yellow")
+                return None
             pending[spot] = amount
+            # The rules get first say: "over the limit" is more use than
+            # "you cannot afford it" when the amount is both.
+            refused = self._place(pending)
+            if refused is not None:
+                pending[spot] = was          # nothing moved, so say so plainly
+                return Text(refused, style="red")
             # R2.11 the chip is on the layout now, so the dealer says something
             if spot.startswith("toke_") and amount > was:
                 return render_dealer_says(
@@ -921,9 +957,19 @@ class App:
         seat = t.seats[index]
 
         if cmd == "move":
-            t.move_seat(me, index)
+            released = t.move_seat(me, index)
             self.seat_bets[index] = self.seat_bets.pop(me, dict(self.last_bets))
+            for i in released:
+                self.seat_bets.pop(i, None)
             self._seat_index = index
+            if released:
+                # R2.15 boxes have to be side by side, so moving gives up the rest
+                gave = ", ".join(str(i + 1) for i in released)
+                return Text(f"You move to seat {index + 1}. Your extra "
+                            f"{'box' if len(released) == 1 else 'boxes'} "
+                            f"({gave}) came down and any bet on "
+                            f"{'it' if len(released) == 1 else 'them'} is back "
+                            f"in your rack.", style="green")
             return Text(f"You move to seat {index + 1}.", style="green")
 
         if cmd == "remove":
@@ -1122,6 +1168,77 @@ class App:
             return seat.chips, already          # cannot cover it; show the truth
         return stack, going_out
 
+    def _place(self, pending) -> str | None:
+        """Put these bets on the layout for real, or say why they cannot go there.
+
+        Typing an amount *is* pushing the chips out (Junze, 2026-09-08), so the
+        felt and the rack both move now rather than at the deal. Nothing sits in
+        a buffer: what the screen shows is what is really on the table. A bet
+        that will not go down is refused and the spot keeps what it had.
+        """
+        seat = self._seat_index
+        was = self.table.seats[seat].pending
+
+        def restore():
+            if was is not None:
+                self.table.place_bets(
+                    seat, base=was.base, push22=was.push22, buster=was.buster,
+                    toke_base=was.toke_base, toke_push22=was.toke_push22,
+                    toke_buster=was.toke_buster)
+
+        self.table.cancel_bets(seat)
+        if not pending["base"]:
+            # R2.4 nothing stands on the layout without a base bet behind it
+            resting = self.table.seats[seat].toke_on_table
+            others = {k: v for k, v in pending.items() if k != "base"}
+            others["toke_base"] = max(others["toke_base"] - resting, 0)
+            if any(others.values()):
+                restore()
+                return "a side bet requires a base bet"
+            return None
+        try:
+            self.table.place_bets(seat, **pending)
+        except ChipsError:
+            # R2.8 the rack, not the rules -- _bet_rejection says it better
+            restore()
+            return self._bet_rejection(pending) or "Your chips will not make that."
+        except BetError as exc:
+            restore()
+            return str(exc)
+        return None
+
+    def _bet_rejection(self, pending) -> str | None:
+        """Why this seat cannot put these bets up, or None if it can.
+
+        Checked the moment an amount is typed, not just at the deal (R2.8). A
+        number that sits on the screen looking accepted and then turns out to be
+        unpayable is worse than being told straight away (Junze, 2026-09-08).
+        """
+        seat = self.table.seats[self._seat_index]
+        # A bet already down has left the rack; it comes back before the new one
+        # goes out, or lowering a bet would look unaffordable.
+        already = seat.committed if seat.pending else 0
+        available = seat.bankroll + already
+        going_out = self._chips_out(pending)
+        if going_out > available:
+            return (f"That comes to {format_money(going_out)} and you have "
+                    f"{format_money(available)}.")
+        stack = seat.chips.copy()
+        if already:
+            stack.receive(already)
+        resting = seat.toke_on_table
+        spots = [pending["base"], pending["push22"], pending["buster"],
+                 max(pending["toke_base"] - resting, 0),
+                 pending["toke_push22"], pending["toke_buster"]]
+        try:
+            for amount in spots:
+                if amount:
+                    stack.pay_with_change(amount)
+        except ValueError:
+            # R2.8 the dealer makes change, but only out of chips that exist
+            return "Your chips will not make that. Break one up with `x` first."
+        return None
+
     def _chips_out(self, pending) -> int:
         """What actually leaves the rack: the dealer's resting toke is already out."""
         resting = self.table.seats[self._seat_index].toke_on_table
@@ -1152,6 +1269,8 @@ class App:
             else:
                 self._player_turn(state, seat_index)
 
+        self._reveal_hands(state)
+
         # Read after the round, so insurance taken part-way through is counted.
         staked = [t.seats[t.table_seat_of(i)].committed
                   for i in range(len(t._round_seats))]
@@ -1162,7 +1281,8 @@ class App:
         self._carry_bets_over(results)
 
         c.clear()
-        c.print(render_screen(state, t, rack_seat=self._first_human()))
+        c.print(render_screen(state, t, rack_seat=self._first_human(),
+                              viewer=self._viewer()))
         c.print(render_results(state, results, t, staked))
         for line in self._settlement_chatter(state, results, staked):
             c.print(line)
@@ -1194,9 +1314,45 @@ class App:
             for spot in ("toke_base", "toke_push22", "toke_buster"):
                 remembered[spot] = 0
 
+    def _viewer(self, seat: int | None = None) -> set[int]:
+        """R3.7 the table seats whose cards the person reading the screen can see.
+
+        Somebody playing two boxes picks both of them up, so this follows the
+        person and not the chair. Identity, not name: a person may be sharing a
+        character's name and must not be shown that character's cards.
+        """
+        if seat is None:
+            seat = self._seat_index
+        if not 0 <= seat < len(self.table.seats):
+            return set()
+        who = self.table.seats[seat].occupant
+        if who is None or who.is_bot:
+            return set()
+        return {i for i, s in enumerate(self.table.seats)
+                if s.occupied and s.occupant is who}
+
     def _first_human(self) -> int:
         seats = self.human_seats()
         return seats[0] if seats else 0
+
+    def _reveal_hands(self, state) -> None:
+        """R3.7 the dealer turns the face-down hands over, seat 5 down to seat 1.
+
+        One seat at a time with a pause, because the point of it is that the
+        table gets to see each hand -- flashing them all up at once is the same
+        as not showing them.
+        """
+        c, t = self.console, self.table
+        for seat_no in range(len(t.seats) - 1, -1, -1):
+            index = t.round_index_of(seat_no)
+            if index is None or index >= len(state.seats):
+                continue
+            if not state.reveal_seat(index):
+                continue                     # nothing was face down here
+            c.clear()
+            c.print(render_screen(state, t, rack_seat=self._first_human(),
+                                  acting_seat=seat_no, viewer=self._viewer()))
+            time.sleep(REVEAL_PACE)
 
     def _bot_turn(self, state, seat_index, occupant) -> None:
         """R9.6 show the seat, pause long enough to read it, then play it."""
@@ -1204,7 +1360,8 @@ class App:
         hand = state.current()
         c.clear()
         c.print(render_screen(state, self.table, focus_hand=hand,
-                              rack_seat=seat_index, acting_seat=seat_index))
+                              rack_seat=seat_index, acting_seat=seat_index,
+                              viewer=self._viewer()))
         time.sleep(BOT_PACE)
         legal = self.table.legal_actions()
         want = occupant.bot.decide(hand, value_of(state.upcard), self.rules)
@@ -1253,7 +1410,8 @@ class App:
         if pace:
             self.console.clear()
             self.console.print(render_screen(state, self.table,
-                                             banner=self._scenario_banner()))
+                                             banner=self._scenario_banner(),
+                                             viewer=self._viewer()))
             time.sleep(pace)
 
     def _insurance(self, state, seat_index: int = 0) -> None:
@@ -1265,6 +1423,7 @@ class App:
             c.clear()
             c.print(render_screen(state, self.table, rack_seat=seat_index,
                                   acting_seat=seat_index,
+                                  viewer=self._viewer(seat_index),
                                   note=Text("Dealer shows an ace.", style="bold yellow")))
             # Enter declines. Insurance costs real money, so the default must be
             # the one that spends nothing; the brackets mark it.
@@ -1296,7 +1455,8 @@ class App:
             c.print(render_screen(state, self.table, focus_hand=hand,
                                   note=self._action_bar(hand, actions),
                                   banner=self._scenario_banner(),
-                                  rack_seat=seat_index, acting_seat=seat_index))
+                                  rack_seat=seat_index, acting_seat=seat_index,
+                                  viewer=self._viewer(seat_index)))
             raw = c.input("\n  > ").strip().lower()
             if raw in ACTION_KEYS and ACTION_KEYS[raw] in actions:
                 self.table.act(ACTION_KEYS[raw])

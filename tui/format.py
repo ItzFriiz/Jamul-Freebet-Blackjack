@@ -30,18 +30,24 @@ def card_text(card: Card | None, hidden: bool = False) -> Text:
     return Text(f" {card_name(card)} ".center(CARD_WIDTH), style=style)
 
 
-def cards_text(cards, hidden_from: int | None = None) -> Text:
+def cards_text(cards) -> Text:
+    """A row of cards. A `None` in the list is one still face down (R3.7)."""
     out = Text()
     for i, c in enumerate(cards):
         if i:
             out.append(" ")
-        out.append(card_text(c, hidden=hidden_from is not None and i >= hidden_from))
+        out.append(card_text(c))
     return out
 
 
-def hand_total_text(hand, is_dealer: bool = False, push_total: int = 22) -> Text:
+def hand_total_text(hand, is_dealer: bool = False, push_total: int = 22,
+                    known: bool = True) -> Text:
     if not hand.cards:
         return Text("")
+    if not known:
+        # R3.7 part of this hand is still face down, so nobody can total it.
+        # Showing the total of what is showing would read as the whole hand.
+        return Text("?", style="dim")
     if is_dealer and hand.hard_total == push_total:
         # R6.4 the signature rule: a dealer 22 is not a bust, it pushes every
         # hand still standing. Showing it as "BUST" would read as a player win.

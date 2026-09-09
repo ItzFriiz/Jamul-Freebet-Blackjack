@@ -16,18 +16,15 @@ from .format import cards_text, hand_total_text, rack_text
 FELT = "green4"
 
 
-def dealer_display(state) -> tuple[list, int | None]:
-    """The dealer's cards, and the index from which they are still face down."""
-    if state is None:
-        return [], None
-    cards = list(state.dealer.cards)
+def dealer_display(state) -> list:
+    """The dealer's cards as the table sees them; `None` is one still face down."""
+    if state is None or not state.dealer.cards:
+        return []
     if state.hole_revealed or state.phase is Phase.SETTLE:
-        return cards, None
+        return list(state.dealer.cards)
     # One card is showing; the hole card is either not drawn yet or drawn but
     # still face down after a peek (R3.3/R3.4).
-    if len(cards) < 2:
-        return cards + [None], 1
-    return cards[:2], 1
+    return [state.dealer.cards[0], None]
 
 
 def _render_prep(table, acting_seat=None):
@@ -89,7 +86,8 @@ def _render_prep(table, acting_seat=None):
     return grid
 
 
-def render_felt(state, table, focus_hand=None, acting_seat=None) -> Panel:
+def render_felt(state, table, focus_hand=None, acting_seat=None,
+                viewer=()) -> Panel:
     # Padding is tight on purpose: at 80 columns all five columns have to fit,
     # and rich squeezes the last one first if they do not.
     # A name column of its own, so everyone's cards start at the same place
@@ -105,19 +103,20 @@ def render_felt(state, table, focus_hand=None, acting_seat=None) -> Panel:
     grid.add_column(justify="left", min_width=16, no_wrap=True)   # stakes
     grid.add_column(justify="left", width=9, no_wrap=True)        # whose turn
 
-    cards, hidden_from = dealer_display(state)
+    cards = dealer_display(state)
     dealer_total = Text("")
-    if state is not None and hidden_from is None and state.dealer.cards:
+    if cards and None not in cards:
         dealer_total = hand_total_text(state.dealer, is_dealer=True,
                                        push_total=table.rules.dealer_push_total)
     who = Text(table.dealer.name if getattr(table, "dealer", None) else "DEALER",
                style="bold cyan")
-    grid.add_row(Text(""), Text(""), who, cards_text(cards, hidden_from),
+    grid.add_row(Text(""), Text(""), who, cards_text(cards),
                  dealer_total, Text(""), Text(""))
     grid.add_row("", "", "", "", "", "", "")
 
     for seat_no in range(len(table.seats)):
-        _add_seat_rows(grid, table, state, seat_no, focus_hand, acting_seat)
+        _add_seat_rows(grid, table, state, seat_no, focus_hand, acting_seat,
+                       set(viewer))
 
     # R2.18 / R9.5 anyone watching from the rail is still at the table, and so
     # is anyone who has been invited but is waiting for the shoe to change.
@@ -131,6 +130,10 @@ def render_felt(state, table, focus_hand=None, acting_seat=None) -> Panel:
     if rail is not None:
         body = Group(grid, rail)
     title = "[bold]Free Bet Blackjack[/bold] - Jamul"
+    # R2.2 the limit placard sits on the table, so it is on every screen
+    r = table.rules
+    title += (f"   [bold]{format_money(r.min_bet)}[/bold]"
+              f"-[bold]{format_money(r.max_bet)}[/bold]")
     if getattr(table, "dealer", None) is not None:
         title += f"   dealer: [bold]{table.dealer.name}[/bold]"
     return Panel(body, title=title, subtitle=header,
@@ -169,11 +172,14 @@ def _rail_line(table):
     return out
 
 
-def _add_seat_rows(grid, table, state, seat_no, focus_hand, acting_seat) -> None:
+def _add_seat_rows(grid, table, state, seat_no, focus_hand, acting_seat,
+                   viewer=frozenset()) -> None:
     """One table seat, however many hands it is playing.
 
     Every seat is drawn, not just the ones in the round -- an empty chair and a
     player sitting a hand out are both things the table can see (R9.2, R9.5).
+    `viewer` is the set of table seats the person reading the screen is holding:
+    they see their own cards in full and everyone else's face-up ones (R3.7).
     """
     seat = table.seats[seat_no]
     number = Text(f"{seat_no + 1}", style="bold" if seat.occupied else "dim")
@@ -210,9 +216,12 @@ def _add_seat_rows(grid, table, state, seat_no, focus_hand, acting_seat) -> None
             marker = Text("")
         who = (Text(seat.label, style=name_style) if hand_no == 0
                else Text(f" #{hand_no + 1}", style="dim"))
+        mine = seat_no in viewer
+        shown = hand.visible_to(mine)
         grid.add_row(number if hand_no == 0 else blank,
                      kind if hand_no == 0 else blank, who,
-                     cards_text(hand.cards), hand_total_text(hand),
+                     cards_text(shown),
+                     hand_total_text(hand, known=None not in shown),
                      _stake_text(hand), marker)
 
     # Side bets belong to the seat rather than to any one hand, so they get their
@@ -288,18 +297,21 @@ def shoe_counts(table, state=None) -> tuple[int, int, int]:
 
     The hole card is drawn only when the dealer needs it, and stays face down
     until the peek resolves, so it counts as unseen -- that is what a person at
-    the table actually knows. Once settlement sweeps the hands into the tray the
-    cards are no longer on the felt, even though the screen still shows them.
+    the table actually knows. R3.7 the players' opening cards are face down too,
+    and count the same way: on the felt, but not yet seen by anyone counting.
+    Once settlement sweeps the hands into the tray the cards are no longer on
+    the felt, even though the screen still shows them.
     """
     shoe = table.shoe
-    hidden_hole = 0
+    hidden = 0
     face_up = 0
     if state is not None and not state.swept:
         face_up = state.cards_in_play
         if state.hole_drawn and not state.hole_revealed:
-            hidden_hole = 1
-            face_up -= 1
-    return shoe.remaining + hidden_hole, face_up, shoe.discarded
+            hidden += 1
+        hidden += state.face_down_on_felt
+        face_up -= hidden
+    return shoe.remaining + hidden, face_up, shoe.discarded
 
 
 def render_shoe(table, state=None) -> Panel:
@@ -471,9 +483,9 @@ def render_session(table, seats=None) -> Panel:
 
 def render_screen(state, table, focus_hand=None, note=None, banner=None,
                   rack_seat=0, acting_seat=None, standing=None,
-                  rack_stack=None, on_layout: int = 0) -> Group:
+                  rack_stack=None, on_layout: int = 0, viewer=()) -> Group:
     parts = [banner,
-             render_felt(state, table, focus_hand, acting_seat),
+             render_felt(state, table, focus_hand, acting_seat, viewer),
              render_shoe(table, state), render_payouts(),
              render_rack(table, rack_seat, standing, rack_stack, on_layout)]
     if note:

@@ -40,6 +40,34 @@ class Hand:
     doubled_free: bool = False      # that double was on the casino's money (R4.2)
     stood: bool = False
 
+    # R3.7 the opening two cards are dealt face down. A hand is turned over when
+    # it busts, when it is a blackjack, and when the player asks to double or
+    # split -- and once it is over it stays over. Cards drawn by hitting land
+    # face up either way, which is why this is one flag and not a list.
+    exposed: bool = False
+
+    # --- What the rest of the table can see (R3.7) -------------------------
+    @property
+    def face_down(self) -> int:
+        """How many of the opening cards are still turned over on the felt."""
+        if self.exposed:
+            return 0
+        return min(2, len(self.cards))
+
+    def public_cards(self) -> list[Card]:
+        """The cards anyone at the table has actually seen from this hand."""
+        return self.cards[self.face_down:]
+
+    def visible_to(self, owner: bool) -> list[Card | None]:
+        """This hand as one viewer sees it. `None` is a card still face down.
+
+        The player holding it always sees all of it -- they are allowed to pick
+        their own cards up and look.
+        """
+        if owner:
+            return list(self.cards)
+        return [None] * self.face_down + self.cards[self.face_down:]
+
     # --- Totals ------------------------------------------------------------
     @property
     def hard_total(self) -> int:
