@@ -111,6 +111,19 @@ class Hand:
             return False
         return True
 
+    def split_is_free(self, rules) -> bool:
+        """R4.4 the casino backs a split -- except a pair of ten-value cards.
+
+        Breaking up a twenty is the player's own idea, so the player pays for
+        the second box; every other pair splits on the house.
+        """
+        if len(self.cards) != 2:
+            return False
+        a, b = self.cards
+        if is_ten_rank(a) and is_ten_rank(b):
+            return rules.ten_pair_split_is_free
+        return True
+
     def can_double(self, rules) -> bool:
         """Only on the first two cards; never on a split-ace hand (R4.6, one card only)."""
         if self.is_finished or len(self.cards) != 2:

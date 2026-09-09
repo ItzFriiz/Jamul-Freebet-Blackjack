@@ -110,15 +110,17 @@ SCENARIOS: dict[str, Scenario] = {
     ),
     "ten-split": Scenario(
         key="ten-split",
-        title="Splitting 10 and K, and why the resulting A+10 is only 21",
+        title="Paying to split 10 and K, and why the resulting A+10 is only 21",
         hint="p (split), then s, s",
         #     p1  up  p2 | h1 draw | h2 draw | hole
         script="10S 9S KH  AD  9C  10D",
         actions=["SPLIT", "STAND", "STAND"],
+        # A ten pair is a paid split (R4.4), so the second box is the player's
+        # own $25 -- $50 goes out and both hands are at risk.
         # dealer 19. hand 1 is A+10 = 21, which after a split is only 21 and not a
         # blackjack (R4.8), so it pays even money: 25 + 25 = 50.
-        # hand 2 is 19 and pushes; it was the free hand, so nothing comes back.
-        expect_to_player=5000,
+        # hand 2 is 19 and pushes, so its own 25 comes back. 50 + 25 = 75.
+        expect_to_player=7500,
     ),
     "buster-jackpot": Scenario(
         key="buster-jackpot",

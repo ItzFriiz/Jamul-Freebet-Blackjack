@@ -1206,7 +1206,7 @@ class App:
         c.print(render_screen(state, self.table, focus_hand=hand,
                               rack_seat=seat_index, acting_seat=seat_index))
         time.sleep(BOT_PACE)
-        legal = state.legal_actions()
+        legal = self.table.legal_actions()
         want = occupant.bot.decide(hand, value_of(state.upcard), self.rules)
         if want not in legal:
             want = Action.STAND if Action.STAND in legal else legal[0]
@@ -1290,7 +1290,7 @@ class App:
     def _player_turn(self, state, seat_index: int = 0) -> None:
         c = self.console
         hand = state.current()
-        actions = state.legal_actions()
+        actions = self.table.legal_actions()
         while True:
             c.clear()
             c.print(render_screen(state, self.table, focus_hand=hand,
@@ -1309,16 +1309,21 @@ class App:
         labels = {
             Action.HIT: ("h", "Hit"),
             Action.STAND: ("s", "Stand"),
-            Action.SPLIT: ("p", "Split (FREE)"),
         }
         for action in actions:
+            # A free move is the casino's money, so it gets the cyan highlight;
+            # a paid one costs the player and reads as an ordinary choice.
             if action is Action.DOUBLE:
                 free = hand.double_is_free(self.rules)
                 key, label = "d", "Double (FREE)" if free else "Double"
                 style = "bold cyan" if free else "bold"
+            elif action is Action.SPLIT:
+                free = hand.split_is_free(self.rules)
+                key, label = "p", "Split (FREE)" if free else "Split"
+                style = "bold cyan" if free else "bold"
             else:
                 key, label = labels[action]
-                style = "bold cyan" if action is Action.SPLIT else "bold"
+                style = "bold"
             out.append(f"[{key}] ", style="bold yellow")
             out.append(f"{label}   ", style=style)
         return out

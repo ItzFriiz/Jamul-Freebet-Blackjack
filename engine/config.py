@@ -46,6 +46,7 @@ class Rules:
     # --- Player actions (R4) ---
     free_double_totals: frozenset[int] = frozenset({9, 10, 11})   # R4.2
     ten_ranks_are_pairs: bool = True        # R4.10 10/J/Q/K all pair with each other
+    ten_pair_split_is_free: bool = False    # R4.4 a 10/J/Q/K pair splits on the player's money
     max_splits: int | None = None           # R4.5 None means no limit
 
     # --- Dealer shifts (R2.14) ---

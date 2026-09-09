@@ -171,8 +171,12 @@ class Bot:
         return self._hit_or_stand(hand, upcard_value, rules)
 
     def _will_split(self, hand: Hand, rules) -> bool:
-        """Every split is free (R4.4), so the only question is temperament."""
+        """Free splits are temperament; a paid one is breaking up a twenty (R4.4)."""
         style = self.character.play
+        if not hand.split_is_free(rules):
+            # A ten pair costs the player's own money to split. Only the reckless
+            # one at the table would hand over a chip to wreck a twenty.
+            return style == "aggressive"
         if style == "cautious" and hand.total == 20:
             return False                  # will not break up a twenty, free or not
         return True

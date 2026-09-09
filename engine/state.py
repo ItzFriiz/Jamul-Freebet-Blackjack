@@ -95,6 +95,11 @@ class RoundState:
         self.hole_revealed = False
         self.dealer_blackjack = False
 
+        # Chips the player owes for the action just taken -- a paid double or a
+        # paid split. The round knows the rules, the table owns the chips, so
+        # the amount is handed over here and collected there.
+        self.player_owes = 0
+
         self.phase = Phase.DEAL
         self.current_seat = 0
         self.current_hand = 0
@@ -149,7 +154,9 @@ class RoundState:
                 return False
             return self._pending_card or len(hand.cards) < 2
         if self.phase is Phase.DEALER:
-            return not self.hole_drawn or self._dealer_should_hit()
+            if not self.hole_drawn:
+                return True             # R6.3 the hole card is always turned over
+            return self._dealer_must_play_out() and self._dealer_should_hit()
         return False
 
     def chance_outcomes(self) -> list[tuple[Card, float]]:
@@ -191,7 +198,7 @@ class RoundState:
             if not self.hole_drawn:
                 self.hole_drawn = True
                 self.hole_revealed = True
-            if not self._dealer_should_hit():
+            if not self._dealer_must_play_out() or not self._dealer_should_hit():
                 self.phase = Phase.SETTLE
 
     # --- Decision nodes ----------------------------------------------------
@@ -215,6 +222,24 @@ class RoundState:
             return acts
         return []
 
+    def action_cost(self, action: Action) -> int:
+        """Chips the player must put up for this action right now, 0 if it is free."""
+        if self.phase is Phase.INSURANCE:
+            if action is Action.TAKE_INSURANCE:
+                return round_up_payment(self.seats[self.insurance_seat].bets.base // 2)
+            return 0
+        if self.phase is not Phase.PLAYER:
+            return 0
+        hand = self.current()
+        if hand is None:
+            return 0
+        if action is Action.DOUBLE and not hand.double_is_free(self.rules):
+            return hand.base_unit          # R4.3
+        if action is Action.SPLIT and not hand.split_is_free(self.rules):
+            # R4.4 the new box, and R2.11 the dealer's bet that goes with it
+            return hand.base_unit + hand.toke_unit
+        return 0
+
     def apply_action(self, action: Action) -> None:
         if action not in self.legal_actions():
             raise ValueError(f"{action.name} is not legal in phase {self.phase.name}")
@@ -223,6 +248,7 @@ class RoundState:
             self._apply_insurance(action)
             return
 
+        self.player_owes = 0
         hand = self.current()
         if action is Action.STAND:
             hand.stood = True
@@ -254,14 +280,21 @@ class RoundState:
             hand.toke_house_stake += hand.toke_unit
         else:
             hand.player_stake += hand.base_unit
+            self.player_owes += hand.base_unit
         hand.doubled = True
         self._pending_card = True
 
     def _apply_split(self, hand: Hand) -> None:
-        """R4.4 every split is free: the casino backs the new hand (R6.8)."""
+        """R4.4 the casino backs the new hand -- unless the pair is two tens.
+
+        A ten-ten split is funded by the player (R6.8b), and so is the dealer's
+        bet that goes on the new box: the casino only puts up a free bet where
+        it is already paying, so the player covers that side too (R2.11).
+        """
         seat = self.seats[self.current_seat]
         first, second = hand.cards
         aces = is_ace(first)
+        free = hand.split_is_free(self.rules)
 
         hand.cards = [first]
         hand.from_split = True
@@ -272,15 +305,17 @@ class RoundState:
             Hand(
                 cards=[second],
                 base_unit=hand.base_unit,
-                player_stake=0,
-                house_stake=hand.base_unit,
+                player_stake=0 if free else hand.base_unit,
+                house_stake=hand.base_unit if free else 0,
                 toke_unit=hand.toke_unit,
-                toke_stake=0,
-                toke_house_stake=hand.toke_unit,
+                toke_stake=0 if free else hand.toke_unit,
+                toke_house_stake=hand.toke_unit if free else 0,
                 from_split=True,
                 from_split_aces=aces,
             ),
         )
+        if not free:
+            self.player_owes += hand.base_unit + hand.toke_unit
         # Both halves now hold one card; _settle_position turns that into a chance node.
 
     # --- Phase transitions -------------------------------------------------
@@ -330,12 +365,32 @@ class RoundState:
             self.current_hand += 1                  # nothing left to do with this hand
 
     def _start_dealer_phase(self) -> None:
-        """R6.3 the dealer always finishes the hand, even with every player busted,
-        because the two side bets are settled off the dealer's final total."""
+        """R6.3 the dealer plays only while something on the layout still needs it.
+
+        The hole card always comes up -- the table gets to see it either way --
+        but once every bet out there is already decided, the dealer stops and
+        clears instead of drawing to 17.
+        """
         self.phase = Phase.DEALER
         self.hole_revealed = True
         if not self.is_chance_node():
             self.phase = Phase.SETTLE
+
+    def _dealer_must_play_out(self) -> bool:
+        """R6.3 is any bet still waiting on the dealer's final total?
+
+        A busted hand has lost and a blackjack has won (the peek already ruled
+        out a dealer blackjack), so neither cares what the dealer draws. The two
+        side bets always do -- including the ones placed for the dealer (R2.11).
+        """
+        for seat in self.seats:
+            b = seat.bets
+            if b.push22 or b.buster or b.toke_push22 or b.toke_buster:
+                return True
+            for hand in seat.hands:
+                if not hand.is_bust and not hand.is_blackjack:
+                    return True
+        return False
 
     def _dealer_should_hit(self) -> bool:
         """R6.1 hit to 17, and hit soft 17."""

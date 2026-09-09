@@ -621,17 +621,49 @@ class Table:
     def deal_next(self):
         return self.state.deal_next()
 
-    def act(self, action: Action) -> None:
-        """Apply a player action, taking chips for insurance as it goes (R5.4)."""
-        if self.state.phase is Phase.INSURANCE and action is Action.TAKE_INSURANCE:
+    def legal_actions(self) -> list[Action]:
+        """The round's legal moves, minus anything this seat cannot pay for.
+
+        A paid double or a paid ten-split needs real chips on the felt, so a
+        short rack simply is not offered the choice.
+        """
+        if self.state is None:
+            return []
+        acts = self.state.legal_actions()
+        if self.state.phase is Phase.INSURANCE:
             round_index = self.state.insurance_seat
-            seat_index = self.table_seat_of(round_index)
-            s = self.seats[seat_index]
-            premium = round_up_payment(self.state.seats[round_index].bets.base // 2)
+        elif self.state.phase is Phase.PLAYER:
+            round_index = self.state.current_seat
+        else:
+            return acts
+        s = self.seats[self.table_seat_of(round_index)]
+        return [a for a in acts if s.chips.total >= self.state.action_cost(a)]
+
+    def act(self, action: Action) -> None:
+        """Apply a player action, taking the chips it costs as it goes."""
+        st = self.state
+        if st.phase is Phase.INSURANCE and action is Action.TAKE_INSURANCE:
+            # R5.4 the premium is half the base bet, rounded up (R2.6).
+            s = self.seats[self.table_seat_of(st.insurance_seat)]
+            premium = round_up_payment(st.seats[st.insurance_seat].bets.base // 2)
             handed, _ = s.chips.pay_with_change(premium)
             s.bet_chips["insurance"] = handed
             s.committed += premium
-        self.state.apply_action(action)
+            st.apply_action(action)
+            return
+
+        acting = st.current_seat if st.phase is Phase.PLAYER else None
+        st.apply_action(action)
+        # R4.3 / R4.4 a paid double or a paid split adds the player's own money
+        # to the box; it rides next to the base bet.
+        if acting is not None and st.player_owes:
+            s = self.seats[self.table_seat_of(acting)]
+            handed, _ = s.chips.pay_with_change(st.player_owes)
+            base = s.bet_chips.setdefault("base", {})
+            for denom, n in handed.items():
+                base[denom] = base.get(denom, 0) + n
+            s.committed += st.player_owes
+            st.player_owes = 0
 
     def finish_round(self) -> list[SeatResult]:
         """Settle, move the chips, sweep the cards, and reshuffle if the cut card is out."""
