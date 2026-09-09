@@ -98,10 +98,22 @@ def render_felt(state, table, focus_hand=None, acting_seat=None,
     grid.add_column(justify="right", width=2)                     # seat number
     grid.add_column(justify="left", width=3, no_wrap=True)        # bot or person
     grid.add_column(justify="left", width=9, no_wrap=True)        # who
-    grid.add_column(justify="left", min_width=19)                 # cards
+    # Wide enough for four cards, and never squeezed: rich shrinks a flexible
+    # column first, and the cards are the one thing that must not vanish.
+    grid.add_column(justify="left", min_width=23, no_wrap=True)    # cards
     grid.add_column(justify="left", width=9)                      # total
-    grid.add_column(justify="left", min_width=16, no_wrap=True)   # stakes
-    grid.add_column(justify="left", width=9, no_wrap=True)        # whose turn
+    # R9.11 one column per betting spot, in the same order and the same place
+    # as the betting table before the deal. Listing the side bets on a line of
+    # their own under the cards put them somewhere else entirely from the base
+    # bet, which is easy to miss (Junze, 2026-09-09).
+    # The player's own money and the casino's free bet get a column each. They
+    # settle differently (R6.7/R6.8), and "$1000 + $1000 FREE" does not fit in
+    # one column at any width worth having (Junze, 2026-09-09).
+    grid.add_column(justify="right", width=6, no_wrap=True)       # own stake
+    grid.add_column(justify="right", width=6, no_wrap=True)       # the casino's free bet
+    for _ in range(5):                                            # P22 BST, then the dealer's three
+        grid.add_column(justify="right", width=5, no_wrap=True)
+    grid.add_column(justify="left", width=8, no_wrap=True)        # whose turn
 
     cards = dealer_display(state)
     dealer_total = Text("")
@@ -110,9 +122,23 @@ def render_felt(state, table, focus_hand=None, acting_seat=None,
                                        push_total=table.rules.dealer_push_total)
     who = Text(table.dealer.name if getattr(table, "dealer", None) else "DEALER",
                style="bold cyan")
-    grid.add_row(Text(""), Text(""), who, cards_text(cards),
-                 dealer_total, Text(""), Text(""))
-    grid.add_row("", "", "", "", "", "", "")
+    blank = Text("")
+    grid.add_row(blank, blank, who, cards_text(cards), dealer_total,
+                 *[blank] * 7, blank)
+    grid.add_row(*[blank] * 13)
+
+    # Two header rows over the betting spots, matching the betting table.
+    def head(text, style="dim"):
+        return Text(text, style=style)
+
+    grid.add_row(blank, blank, blank, blank, blank,
+                 head("yours"), blank, blank, blank,
+                 head("dlr", "dim magenta"), blank, blank, blank)
+    grid.add_row(blank, blank, blank, blank, blank,
+                 head("base"), head("free", "dim cyan"),
+                 head("P22"), head("BST"),
+                 head("base", "dim magenta"), head("P22", "dim magenta"),
+                 head("BST", "dim magenta"), blank)
 
     for seat_no in range(len(table.seats)):
         _add_seat_rows(grid, table, state, seat_no, focus_hand, acting_seat,
@@ -187,7 +213,7 @@ def _add_seat_rows(grid, table, state, seat_no, focus_hand, acting_seat,
 
     if not seat.occupied:
         grid.add_row(number, blank, Text("--", style="dim"),
-                     Text("(empty)", style="dim"), blank, blank, blank)
+                     Text("(empty)", style="dim"), *[blank] * 8, blank)
         return
 
     kind = occupant_tag(seat.occupant)
@@ -204,12 +230,21 @@ def _add_seat_rows(grid, table, state, seat_no, focus_hand, acting_seat,
         note = ("waits for the shoe" if seat.waiting_for_shoe
                 else "sitting out" if seat.sitting_out else "watching")
         grid.add_row(number, kind, Text(seat.label, style="dim"),
-                     Text(note, style="dim"), blank, blank, blank)
+                     Text(note, style="dim"), *[blank] * 8, blank)
         return
+
+    # The side bets and the dealer's spots belong to the seat, not to any one
+    # hand, so they sit on the seat's first row and the split hands leave them
+    # empty rather than repeating them.
+    bets = round_seat.bets
+    toke_base = sum(h.toke_stake for h in round_seat.hands)
+    spots = [(bets.push22, "cyan"), (bets.buster, "cyan"),
+             (toke_base, "magenta"), (bets.toke_push22, "magenta"),
+             (bets.toke_buster, "magenta")]
 
     for hand_no, hand in enumerate(round_seat.hands):
         if hand is focus_hand:
-            marker = Text("<- acting", style="bold yellow")
+            marker = Text("<- turn", style="bold yellow")
         elif hand.is_finished:
             marker = Text("done", style="dim")
         else:
@@ -218,69 +253,22 @@ def _add_seat_rows(grid, table, state, seat_no, focus_hand, acting_seat,
                else Text(f" #{hand_no + 1}", style="dim"))
         mine = seat_no in viewer
         shown = hand.visible_to(mine)
+        cells = ([_spot_text(a, style) for a, style in spots] if hand_no == 0
+                 else [blank] * 5)
         grid.add_row(number if hand_no == 0 else blank,
                      kind if hand_no == 0 else blank, who,
                      cards_text(shown),
                      hand_total_text(hand, known=None not in shown),
-                     _stake_text(hand), marker)
-
-    # Side bets belong to the seat rather than to any one hand, so they get their
-    # own line under it instead of being crammed into a stake column that is
-    # already carrying the free bets. The player's and the dealer's go on
-    # separate lines so neither can be long enough to wrap.
-    # Everything riding on this seat that is not one hand's own stake: the
-    # player's two side bets, and every spot they put up for the dealer --
-    # base included, so the dealer's money is laid out like everyone else's
-    # rather than squashed onto a hand as "+$5 dlr" (Junze, 2026-09-07).
-    bets = round_seat.bets
-    toke_base = sum(h.toke_stake for h in round_seat.hands)
-    for prefix, spots, style in (
-            ("", (("P22", bets.push22), ("BST", bets.buster)), "cyan"),
-            ("dlr ", (("base", toke_base), ("P22", bets.toke_push22),
-                      ("BST", bets.toke_buster)), "magenta")):
-        tokens = [(name, amount) for name, amount in spots if amount]
-        if not tokens:
-            continue
-        # Short labels, and wrapped by hand: this column is only about nineteen
-        # characters wide once the cards have had their share. The full names
-        # are on the betting table before every deal.
-        for chunk in _pack(prefix, tokens, width=19, style=style):
-            grid.add_row(blank, blank, blank, chunk, blank, blank, blank)
+                     _spot_text(hand.player_stake, "bold white"),
+                     _spot_text(hand.house_stake, "bold cyan"),
+                     *cells, marker)
 
 
-def _pack(prefix: str, tokens, width: int, style: str = "cyan") -> list:
-    """Lay label/amount pairs out over as few lines as fit the column."""
-    lines, current, plain = [], None, ""
-    for name, amount in tokens:
-        piece = f"{name} {format_money(amount)}"
-        start = prefix if current is None else ""
-        if current is not None and len(plain) + 2 + len(piece) > width:
-            lines.append(current)
-            current, plain, start = None, "", " " * len(prefix)
-        if current is None:
-            current = Text(start, style="dim")
-            plain = start
-        else:
-            current.append("  ")
-            plain += "  "
-        current.append(f"{name} ", style="dim")
-        current.append(format_money(amount), style=style)
-        plain += piece
-    if current is not None:
-        lines.append(current)
-    return lines
-
-
-def _stake_text(hand) -> Text:
-    out = Text()
-    if hand.player_stake:
-        out.append(format_money(hand.player_stake), style="bold white")
-    if hand.house_stake:
-        if len(out):
-            out.append(" + ")
-        out.append(f"{format_money(hand.house_stake)} FREE", style="bold cyan")
-    # The dealer's money is listed under the seat, not tacked onto a hand.
-    return out
+def _spot_text(amount: int, style: str) -> Text:
+    """One betting spot. An empty spot is drawn, not skipped -- that is the point."""
+    if not amount:
+        return Text("-", style="dim")
+    return Text(format_money(amount), style=style)
 
 
 def _shoe_header(table) -> str:

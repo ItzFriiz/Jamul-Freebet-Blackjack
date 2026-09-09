@@ -4,3 +4,9 @@ __pycache__/
 # Self-check scripts, kept out of version control by request.
 # Delete this line to start tracking them.
 scripts/
+
+# Working notes. The published rules and instructions live in README.md and
+# docs/ -- these two are the internal drafts they were written from, and they
+# carry open questions and dated notes that are not for readers.
+/HOWTO.md
+/RULES.md

@@ -32,6 +32,7 @@ DEALER_PACE = 1.0
 # R9.6 how long a computer player's decision sits on screen before it is applied.
 # Without this the other seats resolve faster than anyone can read them.
 REVEAL_PACE = 0.8      # R3.7 turning one seat's hand over at settlement
+SCENARIO_BUY_IN = 2000 * DOLLAR   # enough for any stacked deck's bets
 BOT_PACE = 1.2
 
 ACTION_KEYS = {
@@ -58,6 +59,10 @@ class App:
         self.num_seats = 1
         # R2.11 each human seat remembers its own last bet
         self.seat_bets: dict[int, dict] = {}
+        # Which seat the person at the keyboard is working from. The betting
+        # screen sets it, but the table commands are also reachable from the
+        # rail (R9.3), where that screen has never run.
+        self._seat_index = 0
         self.watcher_name: str | None = None      # R2.18 starts at the rail
         # A panel that takes over the whole screen for one redraw, so a long
         # character list is not fighting the table for space.
@@ -104,7 +109,14 @@ class App:
 
         if not any(self.seat_plan):
             self._plan_seats()
-        self.num_seats = 5 if sum(1 for s in self.seat_plan if s) > 1 else 1
+        if self.scenario:
+            self.seat_plan = self._solo_for_scenario(self.seat_plan)
+        # The single-seat table only exists for one person sitting in seat 1.
+        # Counting heads is not enough: one person who chose seat 3 still needs
+        # a five-seat table, or _seat_everyone walks past them and the round
+        # opens with nobody playing (Junze, 2026-09-09).
+        taken = [i for i, s in enumerate(self.seat_plan) if s]
+        self.num_seats = 1 if taken in ([], [0]) else 5
 
         overrides = {"min_bet": minimum, "dealer_shift_minutes": self.shift_minutes,
                      "num_seats": self.num_seats}
@@ -117,6 +129,13 @@ class App:
         if self.clock is not None:
             kwargs["clock"] = self.clock
         self.table = Table(self.rules, self.rng, **kwargs)
+        if self.scenario:
+            # The stacked deck was built around a particular set of bets, and
+            # they have to be here before _seat_everyone copies last_bets into
+            # each seat -- otherwise the seat keeps the empty spots it was born
+            # with and the scenario opens with nothing on the layout.
+            for spot, value in self.scenario.bets.items():
+                self.last_bets[spot] = value
         self._seat_everyone()
         if self.watcher_name:
             self.table.arrive_standing(self.watcher_name, 0)   # buys in with `i`
@@ -124,10 +143,6 @@ class App:
         c.print(render_dealer_says(self.table.dealer.name,
                                    say("arrive", self.rng, name=self.table.dealer.name)))
         c.input("\n  [dim]enter to sit down[/dim] ")
-        if self.scenario:
-            # The stacked deck was built around a particular set of bets.
-            for spot, value in self.scenario.bets.items():
-                self.last_bets[spot] = value
 
     def _plan_seats(self) -> None:
         """R2.1 who sits where: a person, a named character, or nobody.
@@ -285,7 +300,12 @@ class App:
                 continue
             kind, name = plan
             if kind == "human":
-                self.table.seat_occupant(i, Occupant(name), 0)
+                # R2.8 people arrive with nothing and buy in with `i`. A scenario
+                # is a demonstration rather than a session: its bets are already
+                # on the layout when the screen opens, so the chips have to be
+                # there to cover them or the spots are cleared before it starts.
+                self.table.seat_occupant(
+                    i, Occupant(name), SCENARIO_BUY_IN if self.scenario else 0)
                 self.seat_bets[i] = dict(self.last_bets)
             else:
                 ch = by_name(name)
@@ -379,6 +399,24 @@ class App:
                 return "toke_lose"
         # A pushed toke is neither, so nothing is said about it.
         return None
+
+    def _solo_for_scenario(self, plan):
+        """A stacked deck is dealt to one seat, so clear the rest of the table.
+
+        The scripts in engine/scripted.py are written in the order the engine
+        asks for cards with a single player: p1, upcard, p2. Seat anybody else
+        and every card after the first lands somewhere it was not meant to --
+        the upcard becomes a player's second card, and the hand the scenario
+        exists to demonstrate never happens at all.
+        """
+        people = [s for s in plan if s]
+        if len(people) <= 1:
+            return plan
+        keep = next((s for s in people if s[0] == "human"), people[0])
+        self.console.print(
+            f"  [yellow]A stacked deck is dealt for one seat, so only "
+            f"{keep[1]} takes a chair for this one.[/yellow]")
+        return [s if s is keep else None for s in plan]
 
     def _scenario_banner(self):
         """Stays up while the stacked deck still has cards left to deal."""
@@ -732,13 +770,15 @@ class App:
         pending["toke_base"] = max(pending["toke_base"],
                                    self.table.seats[seat_index].toke_on_table)
         note = None
-        # Carrying last round's bet over only helps while it is still payable.
-        # After a bad round it would sit there looking placed and then be refused
-        # at the deal, which is the thing that is confusing to begin with.
-        if self._bet_rejection(pending) is not None:
+        # R9.15 a bet carried over from last round is a bet, so it goes on the
+        # layout now rather than sitting in the screen's head looking placed.
+        # Anything that will not go down -- too big for the rack after a bad
+        # round, over the limit after a rules change -- clears the spots instead.
+        if self._place(pending) is not None:
             resting = self.table.seats[seat_index].toke_on_table
             pending = {k: 0 for k in pending}
             pending["toke_base"] = resting
+            self._place(pending)
             note = Text("Your last bet is more than you have left, so the spots "
                         "are clear. Put up a new one.", style="yellow")
         while True:
