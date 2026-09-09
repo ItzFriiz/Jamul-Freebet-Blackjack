@@ -45,6 +45,10 @@ when the clock runs out gets finished first.
 | PUSH 22 | $0 to $1,000 |
 | BUSTER | $0 to $1,000 |
 
+Those are the main floor's limits. **The high-limit room takes the base bet to
+$2,000**, and other houses go higher again. The program asks for both ends at
+setup rather than assuming them.
+
 A side bet needs a base bet behind it.
 
 Whatever sat on a winning or pushing spot stays there for the next round. A
@@ -323,7 +327,7 @@ variant is a new `Rules` object, not an edit.
 | `cut_remaining_max` | 36 | Upper clamp |
 | `num_seats` | 1 | 5 for the multi-seat table |
 | `min_bet` | $25 | Chosen at setup |
-| `max_bet` | $1,000 | |
+| `max_bet` | $1,000 | Main floor. High limit is $2,000. Chosen at setup |
 | `max_side_bet` | $1,000 | Each side bet |
 | `free_double_totals` | {9, 10, 11} | Aces count either way |
 | `ten_ranks_are_pairs` | true | 10/J/Q/K pair with each other |

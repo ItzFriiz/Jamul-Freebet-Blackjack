@@ -13,7 +13,8 @@ from rich.text import Text
 
 from engine.cards import value_of
 from engine.chips import format_money, round_up_payment
-from engine.config import DEFAULT_RULES, DOLLAR, Rules
+from engine.config import (DEFAULT_MAX_BET, DEFAULT_MAX_SIDE_BET,
+                          DEFAULT_RULES, DOLLAR, Rules)
 from engine import scripted
 from engine.payout import Outcome
 from engine.players import Bot, by_name, roster, search
@@ -93,6 +94,21 @@ class App:
                 break
             c.print("  [red]Pick 25 or 50.[/red]")
 
+        # R2.2 the main floor caps the base bet at $1,000. The high-limit room
+        # goes to $2,000, and other houses go higher again, so it is asked
+        # rather than assumed.
+        while True:
+            raw = c.input(f"  Table maximum? \\[${DEFAULT_MAX_BET // DOLLAR:,}] "
+                          "[dim](high limit is 2000)[/dim] ").strip()
+            try:
+                maximum = (DEFAULT_MAX_BET if raw == ""
+                           else parse_money(raw.lstrip("$")))
+                if maximum < minimum:
+                    raise ValueError("the maximum cannot be under the minimum")
+                break
+            except ValueError as exc:
+                c.print(f"  [red]{exc}[/red]")
+
         # R2.14 how long each dealer works. Asked here rather than on the command
         # line so it can be changed without leaving the game.
         if self.shift_minutes is None:
@@ -118,7 +134,9 @@ class App:
         taken = [i for i, s in enumerate(self.seat_plan) if s]
         self.num_seats = 1 if taken in ([], [0]) else 5
 
-        overrides = {"min_bet": minimum, "dealer_shift_minutes": self.shift_minutes,
+        overrides = {"min_bet": minimum, "max_bet": maximum,
+                     "max_side_bet": min(maximum, DEFAULT_MAX_SIDE_BET),
+                     "dealer_shift_minutes": self.shift_minutes,
                      "num_seats": self.num_seats}
         self.rules = Rules(**overrides)
         shoe = None

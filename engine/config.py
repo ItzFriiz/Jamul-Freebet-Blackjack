@@ -40,7 +40,7 @@ class Rules:
     # --- Table and betting (R2) ---
     num_seats: int = 1                      # R2.1 single seat for v1
     min_bet: int = 25 * DOLLAR              # R2.2 rises to $50 when the house is busy
-    max_bet: int = 1000 * DOLLAR            # R2.2
+    max_bet: int = 1000 * DOLLAR            # R2.2 main floor; high limit is 2000
     max_side_bet: int = 1000 * DOLLAR       # R2.3
 
     # --- Player actions (R4) ---
@@ -60,5 +60,10 @@ class Rules:
     def deck_size(self) -> int:
         return self.num_decks * 52
 
+
+# What the main floor runs. The high-limit room caps the base bet at $2,000,
+# and other houses go higher again, so the interface asks rather than assumes.
+DEFAULT_MAX_BET = 1000 * DOLLAR
+DEFAULT_MAX_SIDE_BET = 1000 * DOLLAR
 
 DEFAULT_RULES = Rules()

@@ -46,8 +46,9 @@ stay readable.
 
 ## Setting up
 
-Three questions: table minimum ($25 or $50), how often dealers change (10
-minutes, 0 to disable), and who sits in each of the five seats.
+Four questions: table minimum ($25 or $50), table maximum ($1,000 on the main
+floor, $2,000 in the high-limit room), how often dealers change (10 minutes, 0
+to disable), and who sits in each of the five seats.
 
 Type a name for each seat, or press enter to leave it empty. Type `?` to list
 the computer characters with their bios. Type `-` to back up a seat. A
